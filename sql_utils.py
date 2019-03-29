@@ -34,9 +34,26 @@ def expand_template(sql, template_dict):
           params.update(template_dict)
     return sql
 
+def expand_params(sql, param_dict):
+    "Returns tuple of a sql template string and dict of params updated to refect expanded list params"
+    update_params = {}
+    for key in param_dict.keys():
+        if type(param_dict[key]) == list:
+            list_params = {}
+            for i, val in enumerate(param_dict[key]):
+                list_params['%s_%d' % (key, i)] = param_dict[key][i]
+            try:
+                sql = sql % {key: ','.join(['%%(%s)s' % k for k in list_params.keys()])}
+            except KeyError:
+                pass
+            update_params.update(list_params)
+    param_dict.update(update_params)
+    return (sql, param_dict)
+
 def execute_sql(conn, sql, param_dict):
     "Returns results of executing sql as array"
     rows = []
+    sql, param_dict = expand_params(sql, param_dict)
     with conn.cursor() as cursor:
         cursor.execute(sql, param_dict)
         rows = dictfetchall(cursor)
