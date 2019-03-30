@@ -112,7 +112,7 @@ class Statement:
         return (sql, params)
 
     def execute(self, conn, params={}):
-        sql = self.expand(params)
+        sql, params = self.expand(params)
         return execute_sql_template(conn, sql, params, SQLRegister().template_dict)
 
 
