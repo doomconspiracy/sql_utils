@@ -1,4 +1,8 @@
 import copy
+import os
+import os.path as osp
+import pprint
+pp = pprint.PrettyPrinter(indent=4)
 
 def dictfetchall(cursor):
     "Return all rows from a cursor as a dict"
@@ -31,8 +35,8 @@ def expand_template(sql, template_dict):
             sql = sql % params
             error = False
         except KeyError as e:
-          params = get_param_keys(sql)
-          params.update(template_dict)
+            params = get_param_keys(sql)
+            params.update(template_dict)
     return sql
 
 def expand_params(sql, param_dict):
@@ -86,6 +90,7 @@ def insert_mock(sql, params, data, replace_target):
         sql = sql.replace(replace_target, mock_sql)
         return (sql, params)
 
+
 class Statement:
     """
     SQL Statement class to emsulate a sql query context and statement instance tools.
@@ -96,7 +101,7 @@ class Statement:
     def __init__(self, sql=None, params={}):
         self.sql = sql
 
-    def expand(self, params):
+    def expand(self, params={}):
         sql = self.sql
         for template in self.mock_templates.keys():
             sql, params = insert_mock(sql, params, self.mock_templates[template], '%%(%s)s'  % template)
@@ -106,7 +111,7 @@ class Statement:
         sql, params = expand_params(sql, params)
         return (sql, params)
 
-    def execute(self, conn, params):
+    def execute(self, conn, params={}):
         sql = self.expand(params)
         return execute_sql_template(conn, sql, params, SQLRegister().template_dict)
 
@@ -133,10 +138,64 @@ class SQLRegister:
 
     def add(self, name, sql):
         self._statements[name] = sql
+        pp.pprint(sql)
+        try:
+            keys = get_param_keys(sql)
+            for key in keys:
+                pp.pprint(key)
+                if key.endswith('.sql'):
+                    if osp.exists(self.template_path(key)):
+                        self.load_template_file(key)
+        except ValueError as e:
+            pass
 
     def get_statement(self, name):
         return Statement(sql=self._statements[name])
 
     @property
     def template_dict(self):
-        return copy.deepcopy(self._statements) 
+        return copy.deepcopy(self._statements)
+
+    def template_path(self, path):
+        return osp.join(os.getcwd(), path)
+
+    def load_template_file(self, path):
+        template_path = self.template_path(path)
+        with open(template_path) as f:
+            template = f.read()
+        self.add(path, template)
+        return self.get_statement(path)
+
+
+if __name__ == '__main__':
+
+    sqlr = SQLRegister()
+    sqlr.add('query_foo', 'select * from foo f where id=%(foo_id)')
+    sqlr.add('query_nested', 'select * from bar b join (%(query_foo)s) qf ON (qf.id=b.foo_id)')
+
+    sql_statement = sqlr.get_statement('query_nested')
+    pp.pprint(sql_statement.expand({'foo_id': 12}))
+
+    sql_statement = sqlr.get_statement('query_nested')
+    sql_statement.mock_tables = {
+        'foo': {
+            'cols': ['id', 'name'],
+            'rows': [[1, 'foo_1'],[2, 'foo_2']]
+        }
+    }
+    pp.pprint(sql_statement.expand({'foo_id': 12}))
+
+    sql_statement = sqlr.get_statement('query_nested')
+    sql_statement.mock_templates = {
+        'query_foo': {
+            'cols': ['XXX_1', 'XXX_2'],
+            'rows': [['1x1', '1x2']]
+        }
+    }
+    pp.pprint(sql_statement.expand({'foo_id': 12}))
+
+    sql_statement = sqlr.load_template_file(osp.join(os.getcwd(), 'test', 'sql', 'sample1.sql'))
+    pp.pprint(sql_statement.sql)
+    pp.pprint(sql_statement.expand())
+
+
