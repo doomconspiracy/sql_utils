@@ -83,7 +83,7 @@ def data_to_sql_template(cols, rows):
 def insert_mock(sql, params, data, replace_target):
         mock_sql, mock_params = data_to_sql_template(data['cols'], data['rows'])
         params.update(mock_params)
-        sql.replace(replace_target, mock_sql)
+        sql = sql.replace(replace_target, mock_sql)
         return (sql, params)
 
 class Statement:
@@ -98,14 +98,16 @@ class Statement:
 
     def expand(self, params):
         sql = self.sql
-        for table in self.mock_tables.keys():
-            sql, params = insert_mock(sql, params, self.mock_tables[table], table)
         for template in self.mock_templates.keys():
             sql, params = insert_mock(sql, params, self.mock_templates[template], '%%(%s)s'  % template)
-        return expand_params(sql, params)
+        sql = expand_template(sql, SQLRegister().template_dict)
+        for table in self.mock_tables.keys():
+            sql, params = insert_mock(sql, params, self.mock_tables[table], ' %s ' % table)
+        sql, params = expand_params(sql, params)
+        return (sql, params)
 
     def execute(self, conn, params):
-        sql, params = self.expand(params)
+        sql = self.expand(params)
         return execute_sql_template(conn, sql, params, SQLRegister().template_dict)
 
 
