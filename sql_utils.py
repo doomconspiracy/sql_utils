@@ -1,3 +1,4 @@
+import copy
 
 def dictfetchall(cursor):
     "Return all rows from a cursor as a dict"
@@ -79,6 +80,35 @@ def data_to_sql_template(cols, rows):
     template = '\nUNION ALL '.join(values)
     return (template, params)
 
+def insert_mock(sql, params, data, replace_target):
+        mock_sql, mock_params = data_to_sql_template(data['cols'], data['rows'])
+        params.update(mock_params)
+        sql.replace(replace_target, mock_sql)
+        return (sql, params)
+
+class Statement:
+    """
+    SQL Statement class to emsulate a sql query context and statement instance tools.
+    """
+    mock_tables = {}
+    mock_templates = {}
+
+    def __init__(self, sql=None, params={}):
+        self.sql = sql
+
+    def expand(self, params):
+        sql = self.sql
+        for table in self.mock_tables.keys():
+            sql, params = insert_mock(sql, params, self.mock_tables[table], table)
+        for template in self.mock_templates.keys():
+            sql, params = insert_mock(sql, params, self.mock_templates[template], '%%(%s)s'  % template)
+        return expand_params(sql, params)
+
+    def execute(self, conn, params):
+        sql, params = self.expand(params)
+        return execute_sql_template(conn, sql, params, SQLRegister().template_dict)
+
+
 class SQLRegister:
     """
     Singleton class to use a repository for sql and sql template strings with some utility wrappers.
@@ -90,7 +120,7 @@ class SQLRegister:
     from django.db import connection
     result_rows = SQLRegister.execute(connection, 'query_nested', {'foo_id': 12})
     """
-    queries = {}
+    _statements = {}
     __instance = None
     def __new__(cls, name=None, sql=None):
         if SQLRegister.__instance is None:
@@ -100,10 +130,11 @@ class SQLRegister:
         return SQLRegister.__instance
 
     def add(self, name, sql):
-        self.queries[name] = sql
+        self._statements[name] = sql
 
-    def execute(self, conn, name, params):
-        return execute_sql_template(conn, self.queries[name], self.queries, params)
+    def get_statement(self, name):
+        return Statement(sql=self._statements[name])
 
-    def get_sql(self, name):
-        return expand_template(self.queries[name], self.queries)
+    @property
+    def template_dict(self):
+        return copy.deepcopy(self._statements) 
