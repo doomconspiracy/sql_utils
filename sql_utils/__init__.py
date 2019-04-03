@@ -47,10 +47,10 @@ def expand_params(sql, param_dict):
             list_params = {}
             for i, val in enumerate(param_dict[key]):
                 list_params['%s_%d' % (key, i)] = param_dict[key][i]
-            try:
-                sql = sql % {key: ','.join(['%%(%s)s' % k for k in list_params.keys()])}
-            except KeyError:
-                pass
+            params = get_param_keys(sql)
+            params[key] = '(%s)' % ', '.join(['%%(%s)s' % k
+                for k in list_params.keys()])
+            sql = sql % params
             update_params.update(list_params)
     param_dict.update(update_params)
     return (sql, param_dict)
@@ -118,34 +118,28 @@ class Statement:
 
 class SQLRegister:
     """
-    Singleton class to use a repository for sql and sql template strings with some utility wrappers.
+    Repository class for sql and sql template strings with some utility wrappers.
     
     Example usage:
-    SQLRegister('query_foo', 'select * from foo where id=%(foo_id)')
-    SQLRegister('query_nested', 'select * from bar b join (%(query_foo)s) qf ON (qf.id=b.foo_id)')
+    sql_r = SQLRegister()
+    sql_r.add('query_foo', 'select * from foo where id=%(foo_id)')
+    sql_r.add('query_nested', 'select * from bar b join (%(query_foo)s) qf ON (qf.id=b.foo_id)')
 
     from django.db import connection
-    result_rows = SQLRegister.execute(connection, 'query_nested', {'foo_id': 12})
+    result_rows = sql_r.get_statement('query_nested').execute(connection, {'foo_id': 12})
     """
     _statements = {}
-    __instance = None
-    def __new__(cls, name=None, sql=None):
-        if SQLRegister.__instance is None:
-            SQLRegister.__instance = object.__new__(cls)
-        if name is not None and sql is not None:
-            SQLRegister.__instance.add(name, sql)
-        return SQLRegister.__instance
 
-    def add(self, name, sql):
+    def add(self, name, sql, force=False):
+        if name in self._statements.keys() and not force:
+            return
         self._statements[name] = sql
-        pp.pprint(sql)
         try:
             keys = get_param_keys(sql)
             for key in keys:
                 pp.pprint(key)
                 if key.endswith('.sql'):
-                    if osp.exists(self.template_path(key)):
-                        self.load_template_file(key)
+                    self.load_template_file(key)
         except ValueError as e:
             pass
 
@@ -156,46 +150,20 @@ class SQLRegister:
     def template_dict(self):
         return copy.deepcopy(self._statements)
 
-    def template_path(self, path):
-        return osp.join(os.getcwd(), path)
-
-    def load_template_file(self, path):
-        template_path = self.template_path(path)
+    def load_template_file(self, path, sql_path=None):
+        search_paths = []
+        if not sql_path:
+            sql_path = os.environ['SQL_PATH']
+            search_path = sql_path.split(':')
+        search_path.append(os.getcwd())
+        def get_template_path():
+            for path in search_paths:
+                template_path = osp.join(path, name)
+                if osp.exists(template_path):
+                    return template_path
+            raise Exception('%s sql file not found in SQL_PATH[%s]' %(name, ':'.join(search_paths)))
+        template_path = get_template_path()
         with open(template_path) as f:
             template = f.read()
         self.add(path, template)
         return self.get_statement(path)
-
-
-if __name__ == '__main__':
-
-    sqlr = SQLRegister()
-    sqlr.add('query_foo', 'select * from foo f where id=%(foo_id)')
-    sqlr.add('query_nested', 'select * from bar b join (%(query_foo)s) qf ON (qf.id=b.foo_id)')
-
-    sql_statement = sqlr.get_statement('query_nested')
-    pp.pprint(sql_statement.expand({'foo_id': 12}))
-
-    sql_statement = sqlr.get_statement('query_nested')
-    sql_statement.mock_tables = {
-        'foo': {
-            'cols': ['id', 'name'],
-            'rows': [[1, 'foo_1'],[2, 'foo_2']]
-        }
-    }
-    pp.pprint(sql_statement.expand({'foo_id': 12}))
-
-    sql_statement = sqlr.get_statement('query_nested')
-    sql_statement.mock_templates = {
-        'query_foo': {
-            'cols': ['XXX_1', 'XXX_2'],
-            'rows': [['1x1', '1x2']]
-        }
-    }
-    pp.pprint(sql_statement.expand({'foo_id': 12}))
-
-    sql_statement = sqlr.load_template_file(osp.join(os.getcwd(), 'test', 'sql', 'sample1.sql'))
-    pp.pprint(sql_statement.sql)
-    pp.pprint(sql_statement.expand())
-
-
