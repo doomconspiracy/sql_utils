@@ -1,8 +1,6 @@
 import copy
 import os
 import os.path as osp
-import pprint
-pp = pprint.PrettyPrinter(indent=4)
 
 def dictfetchall(cursor):
     "Return all rows from a cursor as a dict"
@@ -137,7 +135,6 @@ class SQLRegister:
         try:
             keys = get_param_keys(sql)
             for key in keys:
-                pp.pprint(key)
                 if key.endswith('.sql'):
                     self.load_template_file(key)
         except ValueError as e:
